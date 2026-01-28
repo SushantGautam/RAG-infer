@@ -34,7 +34,7 @@ dependencies = [
 
 [project.scripts]
 rag-server = "rag_server:main"
-ingest-document = "ingest_documents:main"
+ingest-documents = "ingest_documents:main"
 setup = "setup_app:main"
 
 [tool.setuptools]
