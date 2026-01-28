@@ -75,6 +75,14 @@ Or run Uvicorn yourself if you prefer:
 uvicorn rag_server:app --host 0.0.0.0 --port 8000
 ```
 
+Or use Astral `uv` to run the console script directly:
+
+```bash
+uv run --refresh --with  git+https://github.com/SushantGautam/vllm-RAG.git rag-server
+```
+
+You can set a `.env` file in the current directory and `uv run ` will pick it up so environment variables (like `OPENAI_API_KEY` or `API_SECRET`) are available to the process.
+
 Note about `API_SECRET` and how to provide it:
 - If starting the server via `python rag_server.py`, you can pass `--api-secret` on the command line.
 - If running `uvicorn rag_server:app` (which imports the module instead of running the script), set `API_SECRET` (or `OPENAI_API_SECRET`) in the environment or in your `.env` before starting the process so the import-time dotenv load picks it up. For example:
