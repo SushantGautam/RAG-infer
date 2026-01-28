@@ -187,6 +187,21 @@ def main() -> None:
     print("\nPlease edit the file to add sensitive values such as OPENAI_API_KEY, EMBEDDING_API_KEY, and any API secrets (they are intentionally not prompted here).")
     print("You can re-run this setup script to override values at any time: \n\n    python setup.py\n")
 
+    # Ensure DOCUMENTS_PATH exists and encourage users to add documents there before ingest
+    doc_path = new_values.get("DOCUMENTS_PATH") or existing_map.get("DOCUMENTS_PATH") or ex_map.get("DOCUMENTS_PATH")
+    if doc_path:
+        abs_doc_path = os.path.abspath(doc_path)
+        try:
+            os.makedirs(abs_doc_path, exist_ok=True)
+            readme_path = os.path.join(abs_doc_path, "README.md")
+            if not os.path.exists(readme_path):
+                with open(readme_path, "w", encoding="utf-8") as rf:
+                    rf.write("# Documents directory\n\nAdd your text documents (e.g., .txt files) here before running `python ingest_documents.py`.\n")
+            print(f"\nDocuments directory ensured at: {abs_doc_path}")
+            print("→ Add your documents (e.g., .txt files) into that directory before running `python ingest_documents.py` to ingest them.")
+        except Exception as e:
+            print(f"\n⚠ Could not create documents directory {abs_doc_path}: {e}")
+
 
 if __name__ == "__main__":
     main()

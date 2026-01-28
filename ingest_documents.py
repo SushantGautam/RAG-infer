@@ -134,8 +134,12 @@ async def ingest_documents(args):
     # Load documents
     print(f"Loading documents from {args.documents_path}...")
     if not os.path.exists(args.documents_path):
-        raise ValueError(f"Documents path '{args.documents_path}' does not exist")
-    
+        # If the documents path doesn't exist, create it and ask the user to add files.
+        os.makedirs(args.documents_path, exist_ok=True)
+        print(f"\n⚠ Documents path '{os.path.abspath(args.documents_path)}' did not exist and has been created.")
+        print("Please add your document files (e.g., .txt) into this directory and run 'ingest-document' command to ingest them.")
+        return
+
     loader = DirectoryLoader(
         args.documents_path,
         glob=args.glob_pattern,
@@ -145,7 +149,8 @@ async def ingest_documents(args):
     documents = loader.load()
     
     if not documents:
-        print(f"⚠ No documents found in {args.documents_path} matching {args.glob_pattern}")
+        print(f"\n⚠ No documents found in {os.path.abspath(args.documents_path)} matching {args.glob_pattern}")
+        print("→ Add document files (e.g., .txt) to this directory before running `python ingest_documents.py`.")
         return
     
     print(f"✓ Loaded {len(documents)} document(s)")
