@@ -219,10 +219,12 @@ def main():
     # so running via `uv run --with ...` or from a different install location
     # still picks up project-level env vars.
     _env_path = find_dotenv(usecwd=True)
+    print(f"DEBUG: cwd={os.getcwd()}, find_dotenv returned: {_env_path}")
     if _env_path:
         print(f"LOADING .env from project path: {_env_path}")
         load_dotenv(_env_path, override=True)
     else:
+        print("No project .env found; falling back to load_dotenv()")
         load_dotenv()
 
     # Validate required env vars are declared in .env or the environment
