@@ -14,6 +14,9 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Optional, List, Literal
 from dotenv import load_dotenv
+import logging
+
+logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -65,6 +68,72 @@ class ChatCompletionResponse(BaseModel):
     model: str = Field(..., description="The model used for completion")
     choices: List[ChatCompletionChoice] = Field(..., description="List of completion choices")
     usage: Usage = Field(..., description="Token usage information")
+
+
+def _extract_assistant_text(obj) -> Optional[str]:
+    """Recursively extract the assistant text from various LLM/chain result shapes.
+
+    This handles dicts with keys like 'result', 'text', 'content', or nested
+    structures like 'choices' -> message -> content. If the object is a string
+    that has appended metadata (e.g., "content='...' additional_kwargs=..."),
+    the regex will extract the inner content and strip trailing metadata.
+    """
+    import re
+
+    # Traverse dict-like structures
+    if isinstance(obj, dict):
+        # Look for common keys first and prefer direct text fields
+        for key in ("result", "text", "content", "answer", "message"):
+            if key in obj:
+                return _extract_assistant_text(obj[key])
+
+        # choices/message patterns
+        if "choices" in obj and isinstance(obj["choices"], (list, tuple)) and obj["choices"]:
+            choice = obj["choices"][0]
+            if isinstance(choice, dict) and "message" in choice:
+                return _extract_assistant_text(choice["message"])
+            return _extract_assistant_text(choice)
+
+        # If no direct text found, return a JSON dump of the dict to preserve structure
+        # This avoids returning stringified reprs with appended metadata
+        try:
+            import json
+            return json.dumps(obj, ensure_ascii=False)
+        except Exception:
+            # Fallback: traverse values
+            for v in obj.values():
+                parsed = _extract_assistant_text(v)
+                if parsed:
+                    return parsed
+            return None
+
+    # Traverse list-like structures
+    if isinstance(obj, (list, tuple)):
+        for v in obj:
+            parsed = _extract_assistant_text(v)
+            if parsed:
+                return parsed
+        return None
+
+    # If it's already a string, try to extract the inner assistant text
+    if isinstance(obj, str):
+        # Look for content='...'
+        m = re.search(r"content=[\'\"](.+?)[\'\"]", obj)
+        if m:
+            return m.group(1).strip()
+        # Strip known appended metadata segments
+        s = obj
+        for sep in (" additional_kwargs=", " response_metadata=", " usage_metadata=", " id='lc_run", " tool_calls="):
+            if sep in s:
+                s = s.split(sep)[0].strip()
+        # If the string looks like a repr with leading "content=...", fall back to entire string
+        return s.strip()
+
+    # Fallback: try to stringify and re-run
+    try:
+        return _extract_assistant_text(str(obj))
+    except Exception:
+        return None
 
 
 def parse_args():
@@ -318,53 +387,134 @@ async def chat_completions(request: ChatCompletionRequest):
         result = await loop.run_in_executor(
             None,  # Use default executor (ThreadPoolExecutor)
             qa_chain.invoke,
-            {"query": question}
+            question
         )
         
-        # Robustly extract the answer from possible result shapes
-        answer = None
-        if isinstance(result, dict):
-            answer = result.get("result") or result.get("text") or next((v for v in result.values() if isinstance(v, str)), None)
-        else:
-            answer = str(result)
-        if not answer:
-            answer = "No answer generated"
+        # Map dict-based responses into OpenAI-compatible choices and usage
+        def _build_choices_from_result(res):
+            choices_out = []
+
+            if isinstance(res, dict) and "choices" in res and isinstance(res["choices"], (list, tuple)):
+                for i, ch in enumerate(res["choices"]):
+                    # Determine index
+                    idx = ch.get("index", i) if isinstance(ch, dict) else i
+                    finish_reason = ch.get("finish_reason", "stop") if isinstance(ch, dict) else "stop"
+
+                    # Extract message and role
+                    role = "assistant"
+                    content = None
+                    if isinstance(ch, dict):
+                        if "message" in ch and isinstance(ch["message"], dict):
+                            role = ch["message"].get("role", role)
+                            content = _extract_assistant_text(ch["message"]) or _extract_assistant_text(ch["message"].get("content"))
+                        elif "text" in ch:
+                            content = _extract_assistant_text(ch["text"]) or str(ch["text"])
+                        else:
+                            content = _extract_assistant_text(ch) or str(ch)
+                    else:
+                        content = _extract_assistant_text(ch) or str(ch)
+
+                    content = content or "No answer generated"
+                    choices_out.append(ChatCompletionChoice(index=idx, message=Message(role=role, content=content), finish_reason=finish_reason))
+
+                return choices_out
+
+            # If result is dict but no choices key, try to extract a top-level text
+            if isinstance(res, dict):
+                c = _extract_assistant_text(res)
+                return [ChatCompletionChoice(index=0, message=Message(role="assistant", content=c or "No answer generated"), finish_reason="stop")]
+
+            # If result is a simple string
+            s = _extract_assistant_text(res) or (str(res) if res is not None else "No answer generated")
+            return [ChatCompletionChoice(index=0, message=Message(role="assistant", content=s), finish_reason="stop")]
+
+        def _extract_usage(res):
+            # Try to find usage numbers in common locations
+            usage_data = None
+            if isinstance(res, dict):
+                # direct usage
+                usage_data = res.get("usage") or res.get("usage_metadata") or res.get("response_metadata", {}).get("token_usage")
+            if isinstance(usage_data, dict):
+                try:
+                    pt = int(usage_data.get("prompt_tokens", 0) or 0)
+                    ct = int(usage_data.get("completion_tokens", 0) or 0)
+                    tt = int(usage_data.get("total_tokens", 0) or pt + ct)
+                    return Usage(prompt_tokens=pt, completion_tokens=ct, total_tokens=tt)
+                except Exception:
+                    pass
+            return Usage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
+
+        choices = _build_choices_from_result(result)
+        usage = _extract_usage(result)
 
     except Exception as e:
-        # If the pipeline fails (e.g., type mismatch between prompt and llm), fall back
-        print(f"Error in qa_chain.invoke: {e}")
+        # If the pipeline fails (e.g., type mismatch between prompt and llm), prefer
+        # forwarding the original request to a configured OpenAI-compatible base URL
+        # (for example, a local vLLM instance). If forwarding is not configured or
+        # fails, do NOT perform the retriever/document fallback — instead echo the
+        # user's question as the assistant response (keeps behavior simple and
+        # predictable for clients that expect model-only behavior).
+
+        forwarded_success = False
+        forward_error = None
         try:
-            # Use the retriever to get documents and format a prompt string
-            retriever_local = globals().get("retriever_obj") or vectorstore.as_retriever(search_kwargs={"k": 3})
-            if hasattr(retriever_local, "get_relevant_documents"):
-                docs = retriever_local.get_relevant_documents(question)
-            elif hasattr(retriever_local, "get_relevant_documents"):
-                docs = retriever_local.get_relevant_documents(question)
-            else:
-                docs = []
+            base_url = None
+            try:
+                base_url = getattr(app.state.args, "openai_base_url", None)
+            except Exception:
+                base_url = None
 
-            context = "\n\n".join(getattr(d, "page_content", str(d)) for d in docs)
-            prompt_text = (
-                "Use the following pieces of context to answer the question at the end.\n"
-                "If you don't know the answer, just say that you don't know, don't try to make up an answer.\n\n"
-                f"Context:\n{context}\n\nQuestion: {question}\nAnswer:"
-            )
+            if base_url:
+                import requests
+                forward_url = base_url.rstrip("/") + "/v1/chat/completions"
+                try:
+                    resp = requests.post(
+                        forward_url,
+                        json={"model": request.model, "messages": [m.dict() for m in request.messages]},
+                        timeout=10,
+                    )
+                    if resp.status_code == 200:
+                        forwarded = resp.json()
+                        # If forwarded response looks like an OpenAI-compatible response,
+                        # map it into our ChatCompletionChoice/Usage types.
+                        if isinstance(forwarded, dict) and "choices" in forwarded:
+                            choices = []
+                            for i, ch in enumerate(forwarded["choices"]):
+                                role = "assistant"
+                                content = None
+                                if isinstance(ch, dict) and "message" in ch and isinstance(ch["message"], dict):
+                                    role = ch["message"].get("role", role)
+                                    content = _extract_assistant_text(ch["message"]) or _extract_assistant_text(ch["message"].get("content"))
+                                else:
+                                    content = _extract_assistant_text(ch) or str(ch)
 
-            llm_local = globals().get("llm")
-            if llm_local is None:
-                raise RuntimeError("LLM not initialized for fallback path")
+                                content = content or "No answer generated"
+                                idx = ch.get("index", i) if isinstance(ch, dict) else i
+                                finish_reason = ch.get("finish_reason", "stop") if isinstance(ch, dict) else "stop"
+                                choices.append(ChatCompletionChoice(index=idx, message=Message(role=role, content=content), finish_reason=finish_reason))
 
-            llm_res = llm_local.invoke(prompt_text)
-            if isinstance(llm_res, dict):
-                answer = llm_res.get("result") or llm_res.get("text") or str(llm_res)
-            else:
-                answer = str(llm_res)
+                            usage = _extract_usage(forwarded)
+                            forwarded_success = True
+                except Exception as fe:
+                    forward_error = fe
+        except Exception as outer_fe:
+            forward_error = outer_fe
 
-        except Exception as e2:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error processing chat completion: {str(e)}; fallback also failed: {str(e2)}"
-            )
+        if not forwarded_success:
+            # Log the original pipeline error and any forwarding error with full traceback.
+            logger.exception("qa_chain.invoke failed")
+            if forward_error is not None:
+                logger.exception("Forwarding to external base URL failed")
+
+            # No retriever-based fallback per user request — echo the user's question
+            choices = [
+                ChatCompletionChoice(
+                    index=0,
+                    message=Message(role="assistant", content=question),
+                    finish_reason="stop",
+                )
+            ]
+            usage = Usage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
 
     # Create OpenAI-compatible response
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
@@ -375,18 +525,8 @@ async def chat_completions(request: ChatCompletionRequest):
         object="chat.completion",
         created=created_timestamp,
         model=request.model or "gpt-3.5-turbo",
-        choices=[
-            ChatCompletionChoice(
-                index=0,
-                message=Message(role="assistant", content=answer),
-                finish_reason="stop"
-            )
-        ],
-        usage=Usage(
-            prompt_tokens=0,  # Not calculated in this implementation
-            completion_tokens=0,  # Not calculated in this implementation
-            total_tokens=0  # Not calculated in this implementation
-        )
+        choices=choices,
+        usage=usage
     )
     
     return response
