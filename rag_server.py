@@ -61,13 +61,20 @@ class Usage(BaseModel):
 
 
 class ChatCompletionResponse(BaseModel):
-    """OpenAI-compatible chat completion response model."""
+    """OpenAI-compatible chat completion response model.
+
+    This model includes an optional `openai_raw_response` field that will contain
+    the original raw response dict returned by an OpenAI-compatible endpoint or
+    by the upstream LLM pipeline when available. This helps debugging and
+    preserves any extra metadata not expressed in the OpenAI-compatible model.
+    """
     id: str = Field(..., description="Unique identifier for the chat completion")
     object: str = Field("chat.completion", description="Object type")
     created: int = Field(..., description="Unix timestamp of when the completion was created")
     model: str = Field(..., description="The model used for completion")
     choices: List[ChatCompletionChoice] = Field(..., description="List of completion choices")
     usage: Usage = Field(..., description="Token usage information")
+    openai_raw_response: Optional[dict] = Field(None, description="The raw OpenAI/OpenAI-compatible response dict (if available)")
 
 
 def _extract_assistant_text(obj) -> Optional[str]:
@@ -380,6 +387,9 @@ async def chat_completions(request: ChatCompletionRequest):
     if not question:
         raise HTTPException(status_code=400, detail="User message content cannot be empty")
     
+    # Prepare a place to store any raw response (from the chain or a forwarded OpenAI-compatible endpoint)
+    raw_response = None
+
     try:
         # Run the synchronous qa_chain.invoke() in a thread pool
         # to support parallel requests without blocking
@@ -389,7 +399,21 @@ async def chat_completions(request: ChatCompletionRequest):
             qa_chain.invoke,
             question
         )
-        
+        # Capture raw response: preserve dicts, wrap plain strings, and
+        # preserve other result types by stringifying them so
+        # `openai_raw_response` is always a dict when available (helps debugging).
+        if isinstance(result, dict):
+            raw_response = result
+        elif isinstance(result, str):
+            raw_response = {"text": result}
+        else:
+            # Preserve non-dict, non-str results (e.g., LangChain run objects)
+            # as a string so clients can inspect them for debugging.
+            try:
+                raw_response = {"text": str(result)}
+            except Exception:
+                raw_response = {"text": repr(result)}
+
         # Map dict-based responses into OpenAI-compatible choices and usage
         def _build_choices_from_result(res):
             choices_out = []
@@ -434,6 +458,25 @@ async def chat_completions(request: ChatCompletionRequest):
             if isinstance(res, dict):
                 # direct usage
                 usage_data = res.get("usage") or res.get("usage_metadata") or res.get("response_metadata", {}).get("token_usage")
+
+            # If not found in a dict, inspect common attributes on objects
+            if usage_data is None:
+                try:
+                    if not isinstance(res, dict):
+                        candidate = getattr(res, "usage", None) or getattr(res, "usage_metadata", None) or getattr(res, "response_metadata", None) or getattr(res, "metadata", None)
+                        if candidate:
+                            if isinstance(candidate, dict):
+                                usage_data = candidate
+                            else:
+                                # Candidate may be an object with numeric attributes
+                                pt = int(getattr(candidate, "prompt_tokens", 0) or 0)
+                                ct = int(getattr(candidate, "completion_tokens", 0) or 0)
+                                tt = int(getattr(candidate, "total_tokens", 0) or (pt + ct))
+                                return Usage(prompt_tokens=pt, completion_tokens=ct, total_tokens=tt)
+                except Exception:
+                    # Ignore and fall through to default
+                    pass
+
             if isinstance(usage_data, dict):
                 try:
                     pt = int(usage_data.get("prompt_tokens", 0) or 0)
@@ -494,6 +537,8 @@ async def chat_completions(request: ChatCompletionRequest):
                                 choices.append(ChatCompletionChoice(index=idx, message=Message(role=role, content=content), finish_reason=finish_reason))
 
                             usage = _extract_usage(forwarded)
+                            # Preserve the raw forwarded response for debugging / client use
+                            raw_response = forwarded
                             forwarded_success = True
                 except Exception as fe:
                     forward_error = fe
@@ -501,10 +546,13 @@ async def chat_completions(request: ChatCompletionRequest):
             forward_error = outer_fe
 
         if not forwarded_success:
-            # Log the original pipeline error and any forwarding error with full traceback.
-            logger.exception("qa_chain.invoke failed")
+            # Log the original pipeline error and any forwarding error without full traceback
+            # (avoid noisy stack traces for expected pipeline errors; enable DEBUG to see full details)
+            logger.error(f"qa_chain.invoke failed: {e}")
             if forward_error is not None:
-                logger.exception("Forwarding to external base URL failed")
+                logger.error(f"Forwarding to external base URL failed: {forward_error}")
+            # If DEBUG enabled, log full traceback for diagnostics
+            logger.debug("Full exception details for qa_chain.invoke/forwarding", exc_info=True)
 
             # No retriever-based fallback per user request — echo the user's question
             choices = [
@@ -526,7 +574,8 @@ async def chat_completions(request: ChatCompletionRequest):
         created=created_timestamp,
         model=request.model or "gpt-3.5-turbo",
         choices=choices,
-        usage=usage
+        usage=usage,
+        openai_raw_response=raw_response
     )
     
     return response
