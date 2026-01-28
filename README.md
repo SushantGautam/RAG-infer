@@ -29,7 +29,7 @@ pip install -r requirements.txt
   # It writes to ./.env by default and backs up any existing .env to ./.env.bak.
   # After running, edit ./.env and add sensitive keys such as OPENAI_API_KEY, EMBEDDING_API_KEY, and API_SECRET.
   # Re-run `python setup.py` anytime to override values; the previous .env will be backed up to .env.bak.
-  # Note: `setup` uses an embedded default example when run remotely or without a local `.env.example`; you don't need to pass `--example`.
+  # Note: `setup` uses an embedded default example when run remotely or without a local `.env.example`; there is no `--example` option.
   ```
 
 - Quick (copy example):

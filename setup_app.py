@@ -89,13 +89,7 @@ def prompt(value_name: str, default: str) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Interactive .env setup from .env.example")
-    parser.add_argument(
-        "--example",
-        default=".",
-        help="Path to the example env file. Use '.' (default) to copy the bundled example packaged with the library",
-    )
-
+    parser = argparse.ArgumentParser(description="Interactive .env setup using embedded defaults")
     parser.add_argument(
         "--dest",
         default=".env",
@@ -103,20 +97,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    example_path = args.example
     dest_path = args.dest
 
-    # If user requested the bundled example ('.') or the provided example path doesn't exist,
-    # use the embedded DEFAULT_EXAMPLE. If a valid path is provided, read that file.
-    if example_path in (".", "./") or not os.path.exists(example_path):
-        ex_lines = [line.rstrip("\n") for line in DEFAULT_EXAMPLE.strip().splitlines()]
-        ex_map = {}
-        for line in ex_lines:
-            m = KEY_RE.match(line.strip())
-            if m:
-                ex_map[m.group(1)] = m.group(2)
-    else:
-        ex_lines, ex_map = read_env_file(example_path)
+    # Use embedded DEFAULT_EXAMPLE as the source for prompts
+    ex_lines = [line.rstrip("\n") for line in DEFAULT_EXAMPLE.strip().splitlines()]
+    ex_map = {}
+    for line in ex_lines:
+        m = KEY_RE.match(line.strip())
+        if m:
+            ex_map[m.group(1)] = m.group(2)
     _, existing_map = read_env_file(dest_path) if os.path.exists(dest_path) else ([], {})
 
     print("\nInteractive setup — enter values or press Enter to accept defaults.")
