@@ -505,78 +505,18 @@ async def chat_completions(request: ChatCompletionRequest, fastapi_request: Requ
         return result
 
     except Exception as e:
-        # If the pipeline fails (e.g., type mismatch between prompt and llm), prefer
-        # forwarding the original request to a configured OpenAI-compatible base URL
-        # (for example, a local vLLM instance). If forwarding is not configured or
-        # fails, do NOT perform the retriever/document fallback — instead echo the
-        # user's question as the assistant response (keeps behavior simple and
-        # predictable for clients that expect model-only behavior).
-
-        forwarded_success = False
-        forward_error = None
-        try:
-            base_url = None
-            try:
-                base_url = getattr(app.state.args, "openai_base_url", None)
-            except Exception:
-                base_url = None
-
-            if base_url:
-                import requests
-                forward_url = base_url.rstrip("/") + "/v1/chat/completions"
-                try:
-                    resp = requests.post(
-                        forward_url,
-                        json={"model": request.model, "messages": [m.dict() for m in request.messages]},
-                        timeout=10,
-                    )
-                    if resp.status_code == 200:
-                        forwarded = resp.json()
-                        # If forwarded response looks like an OpenAI-compatible response,
-                        # map it into our ChatCompletionChoice/Usage types.
-                        if isinstance(forwarded, dict) and "choices" in forwarded:
-                            choices = []
-                            for i, ch in enumerate(forwarded["choices"]):
-                                role = "assistant"
-                                content = None
-                                if isinstance(ch, dict) and "message" in ch and isinstance(ch["message"], dict):
-                                    role = ch["message"].get("role", role)
-                                    content = _extract_assistant_text(ch["message"]) or _extract_assistant_text(ch["message"].get("content"))
-                                else:
-                                    content = _extract_assistant_text(ch) or str(ch)
-
-                                content = content or "No answer generated"
-                                idx = ch.get("index", i) if isinstance(ch, dict) else i
-                                finish_reason = ch.get("finish_reason", "stop") if isinstance(ch, dict) else "stop"
-                                choices.append(ChatCompletionChoice(index=idx, message=Message(role=role, content=content), finish_reason=finish_reason))
-
-                            usage = _extract_usage(forwarded)
-                            # Preserve the raw forwarded response for debugging / client use
-                            raw_response = forwarded
-                            forwarded_success = True
-                except Exception as fe:
-                    forward_error = fe
-        except Exception as outer_fe:
-            forward_error = outer_fe
-
-        if not forwarded_success:
-            # Log the original pipeline error and any forwarding error without full traceback
-            # (avoid noisy stack traces for expected pipeline errors; enable DEBUG to see full details)
-            logger.error(f"qa_chain.invoke failed: {e}")
-            if forward_error is not None:
-                logger.error(f"Forwarding to external base URL failed: {forward_error}")
-            # If DEBUG enabled, log full traceback for diagnostics
-            logger.debug("Full exception details for qa_chain.invoke/forwarding", exc_info=True)
-
-            # No retriever-based fallback per user request — echo the user's question
-            choices = [
-                ChatCompletionChoice(
-                    index=0,
-                    message=Message(role="assistant", content=question),
-                    finish_reason="stop",
-                )
-            ]
-            usage = Usage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
+        # Log the original pipeline error and any forwarding error without full traceback
+        # (avoid noisy stack traces for expected pipeline errors; enable DEBUG to see full details)
+        logger.error(f"qa_chain.invoke failed: {e}")
+        # No retriever-based fallback per user request — echo the user's question
+        choices = [
+            ChatCompletionChoice(
+                index=0,
+                message=Message(role="assistant", content=str(e)),
+                finish_reason="error",
+            )
+        ]
+        usage = Usage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
 
     # Create OpenAI-compatible response
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
