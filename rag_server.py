@@ -37,9 +37,9 @@ class ChatCompletionRequest(BaseModel):
     """OpenAI-compatible chat completion request model."""
     model: Optional[str] = Field(None, description="ID of the model to use")
     messages: List[Message] = Field(..., description="List of messages in the conversation")
-    temperature: Optional[float] = Field(0.7, description="Sampling temperature between 0 and 2")
-    max_tokens: Optional[int] = Field(None, description="Maximum number of tokens to generate")
-    stream: Optional[bool] = Field(False, description="Whether to stream the response")
+    temperature: Optional[float] = Field(None, description="Sampling temperature between 0 and 2 (not currently used)")
+    max_tokens: Optional[int] = Field(None, description="Maximum number of tokens to generate (not currently used)")
+    stream: Optional[bool] = Field(False, description="Whether to stream the response (not currently supported)")
 
 
 class ChatCompletionChoice(BaseModel):
@@ -230,9 +230,19 @@ async def chat_completions(request: ChatCompletionRequest):
     
     Supports parallel requests by running qa_chain.invoke() in a thread pool
     to avoid blocking the async event loop.
+    
+    Note: Currently, streaming, temperature, and max_tokens parameters are not
+    supported and will be ignored if provided.
     """
     if qa_chain is None:
         raise HTTPException(status_code=503, detail="RAG system not initialized")
+    
+    # Check if streaming is requested
+    if request.stream:
+        raise HTTPException(
+            status_code=501,
+            detail="Streaming is not currently supported. Please set stream=false or omit the parameter."
+        )
     
     # Validate messages
     if not request.messages:
