@@ -5,8 +5,6 @@
 - Python 3.7+
 - OpenAI API Key
 
-**No Docker needed!** The application uses a local file-based Milvus database.
-
 ## Setup Steps
 
 ### 1. Install Dependencies

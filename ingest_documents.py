@@ -7,9 +7,10 @@ Milvus database. Run this before starting the server to index your documents.
 
 import argparse
 import os
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from dotenv import load_dotenv
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
-from langchain_community.vectorstores import Milvus
+from langchain_milvus import Milvus
 from langchain_openai import OpenAIEmbeddings
 
 
@@ -148,11 +149,15 @@ def ingest_documents(args):
         # Delete the database file to recreate
         os.remove(args.milvus_db)
     
+    # For Milvus Lite (local) - connect using the correct parameters
     vectorstore = Milvus.from_documents(
         documents=splits,
         embedding=embeddings,
         collection_name=args.collection_name,
-        connection_args={"uri": args.milvus_db},
+        connection_args={
+            "uri": args.milvus_db,
+        },
+        index_params={"index_type": "FLAT", "metric_type": "L2"},
     )
     
     print("✓ Vector store created and populated")
@@ -174,6 +179,9 @@ def ingest_documents(args):
 
 def main():
     """Main entry point."""
+    # Load environment variables from .env file
+    load_dotenv()
+    
     args = parse_args()
     
     try:

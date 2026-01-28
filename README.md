@@ -27,8 +27,6 @@ pip install -r requirements.txt
 export OPENAI_API_KEY="your-api-key-here"
 ```
 
-That's it! No Docker or external services needed.
-
 ## Usage
 
 ### Step 1: Index Your Documents

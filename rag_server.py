@@ -13,13 +13,14 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Optional, List, Literal
+from dotenv import load_dotenv
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from langchain_community.vectorstores import Milvus
+from langchain_milvus import Milvus
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough
+from langchain_core.prompts import PromptTemplate
 
 
 # Global variables to store initialized components
@@ -178,7 +179,10 @@ def initialize_rag_system(args):
     vectorstore = Milvus(
         embedding_function=embeddings,
         collection_name=args.collection_name,
-        connection_args={"uri": args.milvus_db},
+        connection_args={
+            "uri": args.milvus_db,
+        },
+        index_params={"index_type": "FLAT", "metric_type": "L2"},
     )
     print("✓ Connected to vector store")
     
@@ -211,16 +215,23 @@ Answer:"""
     if args.openai_base_url:
         llm_kwargs["base_url"] = args.openai_base_url
     
-    llm = ChatOpenAI(**llm_kwargs)
+    llm_instance = ChatOpenAI(**llm_kwargs)
     
-    # Create QA chain
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=retriever,
-        chain_type_kwargs={"prompt": PROMPT},
-        return_source_documents=False,
+    # Create QA chain using LCEL
+    qa_chain = (
+        RunnableParallel(
+            context=retriever,
+            question=RunnablePassthrough(),
+        )
+        | PROMPT
+        | llm_instance
     )
+
+    # Expose some initialized components to module-level globals for fallbacks
+    global retriever_obj, PROMPT_TEMPLATE, llm
+    retriever_obj = retriever
+    PROMPT_TEMPLATE = PROMPT
+    llm = llm_instance
     
     print("RAG system initialized successfully!")
 
@@ -310,43 +321,83 @@ async def chat_completions(request: ChatCompletionRequest):
             {"query": question}
         )
         
-        answer = result.get("result", "No answer generated")
-        
-        # Create OpenAI-compatible response
-        completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
-        created_timestamp = int(time.time())
-        
-        response = ChatCompletionResponse(
-            id=completion_id,
-            object="chat.completion",
-            created=created_timestamp,
-            model=request.model or "gpt-3.5-turbo",
-            choices=[
-                ChatCompletionChoice(
-                    index=0,
-                    message=Message(role="assistant", content=answer),
-                    finish_reason="stop"
-                )
-            ],
-            usage=Usage(
-                prompt_tokens=0,  # Not calculated in this implementation
-                completion_tokens=0,  # Not calculated in this implementation
-                total_tokens=0  # Not calculated in this implementation
-            )
-        )
-        
-        return response
-    
+        # Robustly extract the answer from possible result shapes
+        answer = None
+        if isinstance(result, dict):
+            answer = result.get("result") or result.get("text") or next((v for v in result.values() if isinstance(v, str)), None)
+        else:
+            answer = str(result)
+        if not answer:
+            answer = "No answer generated"
+
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error processing chat completion: {str(e)}"
+        # If the pipeline fails (e.g., type mismatch between prompt and llm), fall back
+        print(f"Error in qa_chain.invoke: {e}")
+        try:
+            # Use the retriever to get documents and format a prompt string
+            retriever_local = globals().get("retriever_obj") or vectorstore.as_retriever(search_kwargs={"k": 3})
+            if hasattr(retriever_local, "get_relevant_documents"):
+                docs = retriever_local.get_relevant_documents(question)
+            elif hasattr(retriever_local, "get_relevant_documents"):
+                docs = retriever_local.get_relevant_documents(question)
+            else:
+                docs = []
+
+            context = "\n\n".join(getattr(d, "page_content", str(d)) for d in docs)
+            prompt_text = (
+                "Use the following pieces of context to answer the question at the end.\n"
+                "If you don't know the answer, just say that you don't know, don't try to make up an answer.\n\n"
+                f"Context:\n{context}\n\nQuestion: {question}\nAnswer:"
+            )
+
+            llm_local = globals().get("llm")
+            if llm_local is None:
+                raise RuntimeError("LLM not initialized for fallback path")
+
+            llm_res = llm_local.invoke(prompt_text)
+            if isinstance(llm_res, dict):
+                answer = llm_res.get("result") or llm_res.get("text") or str(llm_res)
+            else:
+                answer = str(llm_res)
+
+        except Exception as e2:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error processing chat completion: {str(e)}; fallback also failed: {str(e2)}"
+            )
+
+    # Create OpenAI-compatible response
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+    created_timestamp = int(time.time())
+    
+    response = ChatCompletionResponse(
+        id=completion_id,
+        object="chat.completion",
+        created=created_timestamp,
+        model=request.model or "gpt-3.5-turbo",
+        choices=[
+            ChatCompletionChoice(
+                index=0,
+                message=Message(role="assistant", content=answer),
+                finish_reason="stop"
+            )
+        ],
+        usage=Usage(
+            prompt_tokens=0,  # Not calculated in this implementation
+            completion_tokens=0,  # Not calculated in this implementation
+            total_tokens=0  # Not calculated in this implementation
         )
+    )
+    
+    return response
 
 
 def main():
     """Main entry point for the application."""
     import uvicorn
+    
+    # Load environment variables from .env file
+    load_dotenv()
     
     # Parse command line arguments
     args = parse_args()
