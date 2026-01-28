@@ -222,8 +222,7 @@ async def ingest_documents(args):
     print(f"Database file: {args.milvus_db}")
     print(f"Collection name: {args.collection_name}")
     print()
-    print("You can now start the server with:")
-    print(f"  python rag_server.py --milvus-db {args.milvus_db}")
+    print("You can now start the server with 'start-server' command.")
     print()
 
 
