@@ -162,7 +162,7 @@ def initialize_rag_system(args):
     
     # Set embedding base URL if provided
     if args.embedding_base_url:
-        embedding_kwargs["openai_api_base"] = args.embedding_base_url
+        embedding_kwargs["base_url"] = args.embedding_base_url
     
     embeddings = OpenAIEmbeddings(**embedding_kwargs)
     
@@ -209,7 +209,7 @@ Answer:"""
     
     # Set custom base URL if provided
     if args.openai_base_url:
-        llm_kwargs["openai_api_base"] = args.openai_base_url
+        llm_kwargs["base_url"] = args.openai_base_url
     
     llm = ChatOpenAI(**llm_kwargs)
     

@@ -134,7 +134,7 @@ def ingest_documents(args):
     
     # Set embedding base URL if provided
     if args.embedding_base_url:
-        embedding_kwargs["openai_api_base"] = args.embedding_base_url
+        embedding_kwargs["base_url"] = args.embedding_base_url
     
     embeddings = OpenAIEmbeddings(**embedding_kwargs)
     print("✓ Embeddings initialized")

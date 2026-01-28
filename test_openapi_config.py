@@ -1,5 +1,5 @@
 """
-Test script for OpenAPI-compatible configuration.
+Test script for OpenAI-compatible configuration.
 This script tests the new CLI arguments for custom base URLs and API keys.
 """
 
@@ -8,7 +8,7 @@ import sys
 
 
 def test_rag_server_args():
-    """Test that rag_server.py has OpenAPI-compatible arguments defined."""
+    """Test that rag_server.py has OpenAI-compatible arguments defined."""
     print("Testing rag_server.py CLI arguments...")
     
     # Read the file and check for argument definitions
@@ -37,7 +37,7 @@ def test_rag_server_args():
 
 
 def test_ingest_documents_args():
-    """Test that ingest_documents.py has OpenAPI-compatible arguments defined."""
+    """Test that ingest_documents.py has OpenAI-compatible arguments defined."""
     print("\nTesting ingest_documents.py CLI arguments...")
     
     # Read the file and check for argument definitions
@@ -155,7 +155,7 @@ def test_env_example():
 def main():
     """Run all tests."""
     print("=" * 70)
-    print("OpenAPI-Compatible Configuration Test Suite")
+    print("OpenAI-Compatible Configuration Test Suite")
     print("=" * 70)
     print()
     
