@@ -29,6 +29,37 @@ PROMPT_KEYS = [
     "CHUNK_OVERLAP",
 ]
 
+# Fallback default example content (used when the packaged or local .env.example is not available)
+DEFAULT_EXAMPLE = """
+# OpenAI Configuration
+OPENAI_API_KEY=your-openai-api-key-here
+
+# OpenAI-Compatible API Configuration (optional)
+# Uncomment and set these if using a custom OpenAI-compatible endpoint
+# OPENAI_BASE_URL=https://api.openai.com/v1
+# EMBEDDING_BASE_URL=https://api.openai.com/v1
+# EMBEDDING_API_KEY=your-embedding-api-key-here
+
+# API_SECRET=your-api-secret-here  
+
+# Server Configuration
+HOST=0.0.0.0
+PORT=8000
+
+# Milvus Configuration (local file-based)
+MILVUS_DB=./milvus_demo.db
+COLLECTION_NAME=rag_collection
+
+# Document Configuration
+DOCUMENTS_PATH=./documents
+
+# Model Configuration
+MODEL_NAME=gpt-3.5-turbo
+EMBEDDING_MODEL_NAME=text-embedding-ada-002
+CHUNK_SIZE=1000
+CHUNK_OVERLAP=200
+"""
+
 
 def read_env_file(path: str) -> Tuple[List[str], Dict[str, str]]:
     """Return file lines and a mapping of key->value for assignments found."""
@@ -75,29 +106,17 @@ def main() -> None:
     example_path = args.example
     dest_path = args.dest
 
-    # Resolve example path: allow default '.' to mean the packaged .env.example next to this module
-    packaged_example = os.path.join(os.path.dirname(__file__), ".env.example")
-    if example_path in (".", "./"):
-        if os.path.exists(packaged_example):
-            example_path = packaged_example
-        else:
-            # try local .env.example in current working dir
-            local_example = ".env.example"
-            if os.path.exists(local_example):
-                example_path = local_example
-            else:
-                print(f"Error: example file not found at {packaged_example} or {local_example}")
-                return
-    elif not os.path.exists(example_path):
-        # If provided a path that doesn't exist, try the packaged example as a fallback
-        if os.path.exists(packaged_example):
-            example_path = packaged_example
-        else:
-            print(f"Error: example file not found at {example_path}")
-            return
-
-
-    ex_lines, ex_map = read_env_file(example_path)
+    # If user requested the bundled example ('.') or the provided example path doesn't exist,
+    # use the embedded DEFAULT_EXAMPLE. If a valid path is provided, read that file.
+    if example_path in (".", "./") or not os.path.exists(example_path):
+        ex_lines = [line.rstrip("\n") for line in DEFAULT_EXAMPLE.strip().splitlines()]
+        ex_map = {}
+        for line in ex_lines:
+            m = KEY_RE.match(line.strip())
+            if m:
+                ex_map[m.group(1)] = m.group(2)
+    else:
+        ex_lines, ex_map = read_env_file(example_path)
     _, existing_map = read_env_file(dest_path) if os.path.exists(dest_path) else ([], {})
 
     print("\nInteractive setup — enter values or press Enter to accept defaults.")
