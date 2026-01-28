@@ -30,7 +30,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 from langchain_milvus import Milvus
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -195,6 +195,12 @@ def parse_args():
         help="OpenAI-compatible base URL for LLM (default: uses OpenAI's default or OPENAI_BASE_URL/OPENAI_API_BASE env var)",
     )
     parser.add_argument(
+        "--api-secret",
+        type=str,
+        default=os.getenv("API_SECRET", os.getenv("OPENAI_API_SECRET", None)),
+        help="API secret used to secure this server's endpoints (default: reads from API_SECRET or OPENAI_API_SECRET env var)",
+    )
+    parser.add_argument(
         "--model-name",
         type=str,
         default=os.getenv("OPENAI_MODEL_NAME", os.getenv("MODEL_NAME", "gpt-3.5-turbo")),
@@ -239,9 +245,15 @@ def initialize_rag_system(args):
     if _env_path_runtime:
         load_dotenv(_env_path_runtime, override=False)
 
-    # Debug: reveal whether we picked up .env paths and whether the key is present
+    # Debug: reveal whether we picked up .env paths and whether the keys are present
     try:
-        logger.debug("import-time .env path=%s; runtime .env path=%s; OPENAI_API_KEY in env=%s", _env_path if '_env_path' in globals() else None, _env_path_runtime, ("OPENAI_API_KEY" in os.environ))
+        logger.debug(
+            "import-time .env path=%s; runtime .env path=%s; OPENAI_API_KEY in env=%s; API_SECRET in env=%s",
+            _env_path if '_env_path' in globals() else None,
+            _env_path_runtime,
+            ("OPENAI_API_KEY" in os.environ),
+            ("API_SECRET" in os.environ or "OPENAI_API_SECRET" in os.environ),
+        )
     except Exception:
         pass
 
@@ -253,9 +265,21 @@ def initialize_rag_system(args):
         if values and values.get("OPENAI_API_KEY"):
             os.environ["OPENAI_API_KEY"] = values.get("OPENAI_API_KEY")
 
+        # Also load an API secret (optional) from .env if present. Support both
+        # `API_SECRET` and `OPENAI_API_SECRET` to follow OpenAI-like naming.
+        if "API_SECRET" not in os.environ and not getattr(args, "api_secret", None):
+            if values and values.get("API_SECRET"):
+                os.environ["API_SECRET"] = values.get("API_SECRET")
+            elif values and values.get("OPENAI_API_SECRET"):
+                os.environ["API_SECRET"] = values.get("OPENAI_API_SECRET")
+
     # Validate OpenAI API key
     if args.openai_api_key:
         os.environ["OPENAI_API_KEY"] = args.openai_api_key
+
+    # Allow overriding/setting an API secret from CLI
+    if getattr(args, "api_secret", None):
+        os.environ["API_SECRET"] = args.api_secret
 
     if "OPENAI_API_KEY" not in os.environ:
         raise ValueError(
@@ -411,7 +435,7 @@ async def health():
 
 
 @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
-async def chat_completions(request: ChatCompletionRequest):
+async def chat_completions(request: ChatCompletionRequest, fastapi_request: Request):
     """
     OpenAI-compatible chat completion endpoint.
     
@@ -430,6 +454,27 @@ async def chat_completions(request: ChatCompletionRequest):
             status_code=501,
             detail="Streaming is not currently supported. Please set stream=false or omit the parameter."
         )
+
+    # Require API secret header if configured. If `API_SECRET` (or `OPENAI_API_SECRET`) is
+    # present in the environment or passed via `--api-secret`, require clients to supply
+    # the same secret in the `Authorization: Bearer <secret>` header (or `x-api-secret`).
+    api_secret = None
+    try:
+        api_secret = getattr(app.state.args, "api_secret", None)
+    except Exception:
+        api_secret = None
+    if not api_secret:
+        api_secret = os.environ.get("API_SECRET") or os.environ.get("OPENAI_API_SECRET")
+    if api_secret:
+        auth_hdr = fastapi_request.headers.get("authorization") or fastapi_request.headers.get("x-api-secret")
+        token = None
+        if auth_hdr:
+            if auth_hdr.lower().startswith("bearer "):
+                token = auth_hdr[7:].strip()
+            else:
+                token = auth_hdr.strip()
+        if token != api_secret:
+            raise HTTPException(status_code=401, detail="Unauthorized: invalid API secret")
     
     # Validate messages
     if not request.messages:

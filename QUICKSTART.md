@@ -31,7 +31,9 @@ cp .env.example .env
 # Edit .env and add your API key (OPENAI_API_KEY=...)
 ```
 
-> Tip: You can also pass `--openai-api-key` when starting `rag_server.py`.
+> Tip: You can pass `--openai-api-key` when starting `rag_server.py`.
+> 
+> To **secure** this server so only authorized clients can call it, set `API_SECRET` (or `OPENAI_API_SECRET`) in your `.env` or pass `--api-secret` when starting. When `API_SECRET` is set, include it in requests using `Authorization: Bearer $API_SECRET` or `x-api-secret: $API_SECRET`.
 
 ### 3. Index your documents
 
@@ -73,6 +75,17 @@ Or run Uvicorn yourself if you prefer:
 uvicorn rag_server:app --host 0.0.0.0 --port 8000
 ```
 
+Note about `API_SECRET` and how to provide it:
+- If starting the server via `python rag_server.py`, you can pass `--api-secret` on the command line.
+- If running `uvicorn rag_server:app` (which imports the module instead of running the script), set `API_SECRET` (or `OPENAI_API_SECRET`) in the environment or in your `.env` before starting the process so the import-time dotenv load picks it up. For example:
+
+```bash
+export API_SECRET="your-secret"
+uvicorn rag_server:app --host 0.0.0.0 --port 8000
+```
+
+When deployed under a process manager (systemd, Docker, etc.), set the environment variable in the service/unit or container environment to keep the secret out of source control.
+
 Default host/port: `0.0.0.0:8000` (configurable via CLI flags). The server loads the pre-built Milvus DB at startup and will fail if the DB does not exist.
 
 ### 5. Test the server
@@ -87,9 +100,23 @@ curl http://localhost:8000/health
 
 - Ask a question (OpenAI-compatible endpoint):
 
+Unauthenticated example (when `API_SECRET` is not set):
+
 ```bash
 curl -X POST "http://localhost:8000/v1/chat/completions" \
   -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "messages": [{"role": "user", "content": "What is FastAPI?"}]
+  }'
+```
+
+Authenticated example (when `API_SECRET` is set):
+
+```bash
+curl -X POST "http://localhost:8000/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $API_SECRET" \
   -d '{
     "model": "gpt-3.5-turbo",
     "messages": [{"role": "user", "content": "What is FastAPI?"}]
