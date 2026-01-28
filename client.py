@@ -1,6 +1,6 @@
 """
 Example client for the RAG FastAPI server.
-Demonstrates how to interact with the server using Python requests.
+Demonstrates how to interact with the OpenAI-compatible server using Python requests.
 """
 
 import argparse
@@ -9,19 +9,25 @@ import json
 
 
 def ask_question(url: str, question: str):
-    """Ask a question to the RAG server."""
-    endpoint = f"{url}/ask"
+    """Ask a question to the RAG server using OpenAI-compatible format."""
+    endpoint = f"{url}/v1/chat/completions"
     
     try:
         response = requests.post(
             endpoint,
-            json={"question": question},
+            json={
+                "model": "gpt-3.5-turbo",
+                "messages": [
+                    {"role": "user", "content": question}
+                ]
+            },
             timeout=30
         )
         response.raise_for_status()
         
         result = response.json()
-        return result["answer"]
+        # Extract answer from OpenAI-compatible response
+        return result["choices"][0]["message"]["content"]
     
     except requests.exceptions.RequestException as e:
         return f"Error: {e}"
