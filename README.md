@@ -1,9 +1,10 @@
 # vllm-RAG
 
-FastAPI server for LangChain RAG (Retrieval-Augmented Generation) with local Milvus vector database.
+FastAPI server for LangChain RAG (Retrieval-Augmented Generation) with local Milvus vector database. **OpenAI-compatible API** for seamless integration.
 
 ## Features
 
+- **OpenAI-compatible API** - Drop-in replacement for OpenAI's chat completion endpoint
 - FastAPI server with automatic OpenAPI documentation
 - LangChain RAG system with:
   - Document loading and text splitting
@@ -89,29 +90,53 @@ Note: When using uvicorn directly, you need to set CLI args via environment or m
 
 ## API Endpoints
 
-### POST /ask
+### POST /v1/chat/completions
 
-Ask a question to the RAG system.
+OpenAI-compatible chat completion endpoint for asking questions to the RAG system.
 
 **Request:**
 ```json
 {
-  "question": "What is FastAPI?"
+  "model": "gpt-3.5-turbo",
+  "messages": [
+    {"role": "user", "content": "What is FastAPI?"}
+  ]
 }
 ```
 
 **Response:**
 ```json
 {
-  "answer": "FastAPI is a modern, fast web framework for building APIs with Python..."
+  "id": "chatcmpl-abc123",
+  "object": "chat.completion",
+  "created": 1234567890,
+  "model": "gpt-3.5-turbo",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "FastAPI is a modern, fast web framework for building APIs with Python..."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0
+  }
 }
 ```
 
 **Example with curl:**
 ```bash
-curl -X POST "http://localhost:8000/ask" \
+curl -X POST "http://localhost:8000/v1/chat/completions" \
   -H "Content-Type: application/json" \
-  -d '{"question": "What is FastAPI?"}'
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "messages": [{"role": "user", "content": "What is FastAPI?"}]
+  }'
 ```
 
 **Example with Python:**
@@ -119,10 +144,13 @@ curl -X POST "http://localhost:8000/ask" \
 import requests
 
 response = requests.post(
-    "http://localhost:8000/ask",
-    json={"question": "What is FastAPI?"}
+    "http://localhost:8000/v1/chat/completions",
+    json={
+        "model": "gpt-3.5-turbo",
+        "messages": [{"role": "user", "content": "What is FastAPI?"}]
+    }
 )
-print(response.json())
+print(response.json()["choices"][0]["message"]["content"])
 ```
 
 ### GET /health

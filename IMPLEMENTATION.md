@@ -2,19 +2,20 @@
 
 ## Overview
 
-This implementation provides a complete FastAPI server for a LangChain RAG (Retrieval-Augmented Generation) system with local file-based Milvus vector database.
+This implementation provides a complete FastAPI server for a LangChain RAG (Retrieval-Augmented Generation) system with local file-based Milvus vector database. The server exposes an **OpenAI-compatible API** for seamless integration with existing tools and workflows.
 
 ## Key Features Implemented
 
 ### ✅ Core Requirements Met
 
 1. **FastAPI Server** - Fully functional web server with async support
-2. **POST /ask Endpoint** - Accepts `{"question": string}`, returns `{"answer": string}`
-3. **Parallel Request Support** - Thread-safe using `asyncio.run_in_executor()`
-4. **CLI Configuration** - Complete argparse support for all options
-5. **Uvicorn Integration** - Server runs with uvicorn
-6. **Local Milvus Database** - No Docker or external services required
-7. **Separated Ingestion** - Document loading/indexing separate from server startup
+2. **OpenAI-Compatible API** - POST /v1/chat/completions endpoint following OpenAI specification
+3. **Standard Request/Response Format** - Accepts `{"messages": [{"role": "user", "content": "string"}]}`, returns OpenAI-compatible chat completion response
+4. **Parallel Request Support** - Thread-safe using `asyncio.run_in_executor()`
+5. **CLI Configuration** - Complete argparse support for all options
+6. **Uvicorn Integration** - Server runs with uvicorn
+7. **Local Milvus Database** - No Docker or external services required
+8. **Separated Ingestion** - Document loading/indexing separate from server startup
 
 ### 📁 Files Created
 
@@ -87,9 +88,12 @@ python rag_server.py --host 0.0.0.0 --port 8000
 
 ### 3. Query API
 ```bash
-curl -X POST "http://localhost:8000/ask" \
+curl -X POST "http://localhost:8000/v1/chat/completions" \
   -H "Content-Type: application/json" \
-  -d '{"question": "What is FastAPI?"}'
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "messages": [{"role": "user", "content": "What is FastAPI?"}]
+  }'
 ```
 
 Or use the interactive client:
@@ -112,7 +116,7 @@ python client.py
 ### API Endpoints
 - `GET /` - API information
 - `GET /health` - Health check
-- `POST /ask` - Question answering
+- `POST /v1/chat/completions` - OpenAI-compatible chat completion endpoint
 - `GET /docs` - Swagger UI
 - `GET /redoc` - ReDoc documentation
 

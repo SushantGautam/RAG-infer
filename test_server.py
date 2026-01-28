@@ -30,8 +30,9 @@ def test_server_structure():
         
         # Check for required components
         assert hasattr(rag_server, 'app'), "Missing FastAPI app"
-        assert hasattr(rag_server, 'QuestionRequest'), "Missing QuestionRequest model"
-        assert hasattr(rag_server, 'AnswerResponse'), "Missing AnswerResponse model"
+        assert hasattr(rag_server, 'ChatCompletionRequest'), "Missing ChatCompletionRequest model"
+        assert hasattr(rag_server, 'ChatCompletionResponse'), "Missing ChatCompletionResponse model"
+        assert hasattr(rag_server, 'Message'), "Missing Message model"
         assert hasattr(rag_server, 'parse_args'), "Missing parse_args function"
         assert hasattr(rag_server, 'initialize_rag_system'), "Missing initialize_rag_system function"
         
@@ -39,7 +40,7 @@ def test_server_structure():
         routes = [route.path for route in rag_server.app.routes]
         assert '/' in routes, "Missing root endpoint"
         assert '/health' in routes, "Missing health endpoint"
-        assert '/ask' in routes, "Missing ask endpoint"
+        assert '/v1/chat/completions' in routes, "Missing chat completions endpoint"
         
         print("✓ Server structure is correct")
         print(f"  Found endpoints: {', '.join(routes)}")
@@ -53,15 +54,38 @@ def test_request_models():
     """Test that request/response models work correctly."""
     print("\nTesting Pydantic models...")
     try:
-        from rag_server import QuestionRequest, AnswerResponse
+        from rag_server import ChatCompletionRequest, ChatCompletionResponse, Message, ChatCompletionChoice, Usage
         
-        # Test QuestionRequest
-        req = QuestionRequest(question="What is FastAPI?")
-        assert req.question == "What is FastAPI?"
+        # Test Message
+        msg = Message(role="user", content="What is FastAPI?")
+        assert msg.role == "user"
+        assert msg.content == "What is FastAPI?"
         
-        # Test AnswerResponse
-        resp = AnswerResponse(answer="FastAPI is a web framework")
-        assert resp.answer == "FastAPI is a web framework"
+        # Test ChatCompletionRequest
+        req = ChatCompletionRequest(
+            model="gpt-3.5-turbo",
+            messages=[Message(role="user", content="What is FastAPI?")]
+        )
+        assert req.model == "gpt-3.5-turbo"
+        assert len(req.messages) == 1
+        
+        # Test ChatCompletionResponse
+        resp = ChatCompletionResponse(
+            id="chatcmpl-123",
+            object="chat.completion",
+            created=1234567890,
+            model="gpt-3.5-turbo",
+            choices=[
+                ChatCompletionChoice(
+                    index=0,
+                    message=Message(role="assistant", content="FastAPI is a web framework"),
+                    finish_reason="stop"
+                )
+            ],
+            usage=Usage(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+        )
+        assert resp.id == "chatcmpl-123"
+        assert resp.choices[0].message.content == "FastAPI is a web framework"
         
         print("✓ Pydantic models work correctly")
         return True
