@@ -251,17 +251,42 @@ def initialize_rag_system(args):
     # Connect to existing Milvus vector store
     print(f"Connecting to Milvus database at {args.milvus_db}...")
     
-    if not os.path.exists(args.milvus_db):
+    # Resolve the Milvus DB path. If a relative path is provided, prefer the
+    # current working directory (where the user ran the command). Next, check
+    # the module's directory as a fallback (useful when installed into a venv).
+    milvus_db_path = args.milvus_db
+    attempts = None
+    if not os.path.isabs(milvus_db_path):
+        attempts = [
+            os.path.abspath(os.path.join(os.getcwd(), milvus_db_path)),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), milvus_db_path)),
+            os.path.abspath(milvus_db_path),
+        ]
+        found = None
+        for p in attempts:
+            if os.path.exists(p):
+                found = p
+                break
+        if found:
+            milvus_db_path = found
+        else:
+            # Default to the first attempt in the error message
+            milvus_db_path = attempts[0]
+    else:
+        milvus_db_path = os.path.abspath(milvus_db_path)
+
+    if not os.path.exists(milvus_db_path):
+        info = f" (checked: {', '.join(attempts)})" if attempts else ""
         raise ValueError(
-            f"Milvus database not found at {args.milvus_db}. "
-            f"Please run 'python ingest_documents.py' first to create and populate the database."
+            f"Milvus database not found at {args.milvus_db}{info}. "
+            f"Please run 'python ingest_documents.py' in the project root to create and populate the database, or set --milvus-db or MILVUS_DB env var to the correct path."
         )
-    
+
     vectorstore = Milvus(
         embedding_function=embeddings,
         collection_name=args.collection_name,
         connection_args={
-            "uri": args.milvus_db,
+            "uri": milvus_db_path,
         },
         index_params={"index_type": "FLAT", "metric_type": "L2"},
     )

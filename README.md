@@ -117,6 +117,12 @@ uv run git+https://github.com/<owner>/<repo>.git#rag-server
 uv run git+https://github.com/<owner>/<repo>.git#ingest-document
 ```
 
+You can also use `--with` to install the package first and then run its console script. When using `--with`, add `--` before the script name to separate `uv`'s options from the command. Example:
+
+```bash
+uv run --with git+https://github.com/<owner>/<repo>.git -- rag-server --openai-api-key "$OPENAI_API_KEY" --port 8000
+```
+
 Replace `<owner>/<repo>` with the real Git URL (or a `git+ssh://` URL). You can also pin a branch, tag, or commit, for example:
 
 ```bash
