@@ -33,7 +33,7 @@ dependencies = [
 "Homepage" = "https://github.com/SushantGautam/vllm-RAG"
 
 [project.scripts]
-rag-server = "rag_server:main"
+start-server = "rag_server:main"
 ingest-documents = "ingest_documents:main"
 setup = "setup_app:main"
 
