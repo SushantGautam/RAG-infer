@@ -24,6 +24,7 @@ from langchain_milvus import Milvus
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough
 from langchain_core.prompts import PromptTemplate
+from utils import ai_message_to_chat_completion
 
 
 # Global variables to store initialized components
@@ -62,11 +63,6 @@ class Usage(BaseModel):
 
 class ChatCompletionResponse(BaseModel):
     """OpenAI-compatible chat completion response model.
-
-    This model includes an optional `openai_raw_response` field that will contain
-    the original raw response dict returned by an OpenAI-compatible endpoint or
-    by the upstream LLM pipeline when available. This helps debugging and
-    preserves any extra metadata not expressed in the OpenAI-compatible model.
     """
     id: str = Field(..., description="Unique identifier for the chat completion")
     object: str = Field("chat.completion", description="Object type")
@@ -74,7 +70,6 @@ class ChatCompletionResponse(BaseModel):
     model: str = Field(..., description="The model used for completion")
     choices: List[ChatCompletionChoice] = Field(..., description="List of completion choices")
     usage: Usage = Field(..., description="Token usage information")
-    openai_raw_response: Optional[dict] = Field(None, description="The raw OpenAI/OpenAI-compatible response dict (if available)")
 
 
 def _extract_assistant_text(obj) -> Optional[str]:
@@ -391,104 +386,16 @@ async def chat_completions(request: ChatCompletionRequest):
     raw_response = None
 
     try:
-        # Run the synchronous qa_chain.invoke() in a thread pool
-        # to support parallel requests without blocking
+        # Run the synchronous qa_chain.invoke() in a thread pool and return OpenAI-compatible dict directly.
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
-            None,  # Use default executor (ThreadPoolExecutor)
+            None,
             qa_chain.invoke,
             question
         )
-        # Capture raw response: preserve dicts, wrap plain strings, and
-        # preserve other result types by stringifying them so
-        # `openai_raw_response` is always a dict when available (helps debugging).
-        if isinstance(result, dict):
-            raw_response = result
-        elif isinstance(result, str):
-            raw_response = {"text": result}
-        else:
-            # Preserve non-dict, non-str results (e.g., LangChain run objects)
-            # as a string so clients can inspect them for debugging.
-            try:
-                raw_response = {"text": str(result)}
-            except Exception:
-                raw_response = {"text": repr(result)}
-
-        # Map dict-based responses into OpenAI-compatible choices and usage
-        def _build_choices_from_result(res):
-            choices_out = []
-
-            if isinstance(res, dict) and "choices" in res and isinstance(res["choices"], (list, tuple)):
-                for i, ch in enumerate(res["choices"]):
-                    # Determine index
-                    idx = ch.get("index", i) if isinstance(ch, dict) else i
-                    finish_reason = ch.get("finish_reason", "stop") if isinstance(ch, dict) else "stop"
-
-                    # Extract message and role
-                    role = "assistant"
-                    content = None
-                    if isinstance(ch, dict):
-                        if "message" in ch and isinstance(ch["message"], dict):
-                            role = ch["message"].get("role", role)
-                            content = _extract_assistant_text(ch["message"]) or _extract_assistant_text(ch["message"].get("content"))
-                        elif "text" in ch:
-                            content = _extract_assistant_text(ch["text"]) or str(ch["text"])
-                        else:
-                            content = _extract_assistant_text(ch) or str(ch)
-                    else:
-                        content = _extract_assistant_text(ch) or str(ch)
-
-                    content = content or "No answer generated"
-                    choices_out.append(ChatCompletionChoice(index=idx, message=Message(role=role, content=content), finish_reason=finish_reason))
-
-                return choices_out
-
-            # If result is dict but no choices key, try to extract a top-level text
-            if isinstance(res, dict):
-                c = _extract_assistant_text(res)
-                return [ChatCompletionChoice(index=0, message=Message(role="assistant", content=c or "No answer generated"), finish_reason="stop")]
-
-            # If result is a simple string
-            s = _extract_assistant_text(res) or (str(res) if res is not None else "No answer generated")
-            return [ChatCompletionChoice(index=0, message=Message(role="assistant", content=s), finish_reason="stop")]
-
-        def _extract_usage(res):
-            # Try to find usage numbers in common locations
-            usage_data = None
-            if isinstance(res, dict):
-                # direct usage
-                usage_data = res.get("usage") or res.get("usage_metadata") or res.get("response_metadata", {}).get("token_usage")
-
-            # If not found in a dict, inspect common attributes on objects
-            if usage_data is None:
-                try:
-                    if not isinstance(res, dict):
-                        candidate = getattr(res, "usage", None) or getattr(res, "usage_metadata", None) or getattr(res, "response_metadata", None) or getattr(res, "metadata", None)
-                        if candidate:
-                            if isinstance(candidate, dict):
-                                usage_data = candidate
-                            else:
-                                # Candidate may be an object with numeric attributes
-                                pt = int(getattr(candidate, "prompt_tokens", 0) or 0)
-                                ct = int(getattr(candidate, "completion_tokens", 0) or 0)
-                                tt = int(getattr(candidate, "total_tokens", 0) or (pt + ct))
-                                return Usage(prompt_tokens=pt, completion_tokens=ct, total_tokens=tt)
-                except Exception:
-                    # Ignore and fall through to default
-                    pass
-
-            if isinstance(usage_data, dict):
-                try:
-                    pt = int(usage_data.get("prompt_tokens", 0) or 0)
-                    ct = int(usage_data.get("completion_tokens", 0) or 0)
-                    tt = int(usage_data.get("total_tokens", 0) or pt + ct)
-                    return Usage(prompt_tokens=pt, completion_tokens=ct, total_tokens=tt)
-                except Exception:
-                    pass
-            return Usage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
-
-        choices = _build_choices_from_result(result)
-        usage = _extract_usage(result)
+        result = ai_message_to_chat_completion(result)  # openai format dict.
+        # Assume dict return is guaranteed; return it directly and let FastAPI validate.
+        return result
 
     except Exception as e:
         # If the pipeline fails (e.g., type mismatch between prompt and llm), prefer
@@ -575,7 +482,6 @@ async def chat_completions(request: ChatCompletionRequest):
         model=request.model or "gpt-3.5-turbo",
         choices=choices,
         usage=usage,
-        openai_raw_response=raw_response
     )
     
     return response
