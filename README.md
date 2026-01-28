@@ -28,6 +28,7 @@ pip install -r requirements.txt
   # MODEL_NAME, EMBEDDING_MODEL_NAME, CHUNK_SIZE and CHUNK_OVERLAP.
   # It writes to ./.env by default and backs up any existing .env to ./.env.bak.
   # After running, edit ./.env and add sensitive keys such as OPENAI_API_KEY, EMBEDDING_API_KEY, and API_SECRET.
+  # The interactive setup will also ensure the `DOCUMENTS_PATH` directory exists (default: ./documents). Add your `.txt` documents there before running `python ingest_documents.py`.
   # Re-run `python setup.py` anytime to override values; the previous .env will be backed up to .env.bak.
   # Note: `setup` uses an embedded default example when run remotely or without a local `.env.example`; there is no `--example` option.
   ```
@@ -124,7 +125,7 @@ Note: When using `--with` or running the console scripts locally, `uv` runs comm
 
 ## Adding Documents
 
-- Add `.txt` files to `./documents` (or point ingestion to another folder with `--documents-path`).
+- Add `.txt` files to `./documents` (or point ingestion to another folder with `--documents-path`). The interactive `setup` will create the directory for you; ensure you add documents there before running `python ingest_documents.py`.
 - Re-run ingestion to update the DB (`--recreate` to rebuild from scratch) and restart the server.
 
 ---
