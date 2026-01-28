@@ -122,14 +122,19 @@ def main() -> None:
         new_values[key] = new_val
 
     # Ask user where to write the file (confirm or override dest)
-    dest_input = input(f"Write configuration to file [default: {dest_path}]: ").strip()
+    full_dest = os.path.abspath(dest_path)
+    try:
+        dest_input = input(f"Write configuration to file [default: {dest_path} ({full_dest})]: ").strip()
+    except EOFError:
+        # Non-interactive environment: accept the default
+        dest_input = ""
     if dest_input:
         dest_path = dest_input
 
     # If dest exists and has other variables, keep them unless overwritten by new_values
     dest_exists = os.path.exists(dest_path)
     if dest_exists:
-        print(f"\nNote: {dest_path} already exists. Values you choose below will override existing keys listed in the prompts.")
+        print(f"\nNote: {os.path.abspath(dest_path)} already exists. Values you choose below will override existing keys listed in the prompts.")
 
     # Reconstruct output lines by iterating over example lines and replacing prompted keys
     out_lines: List[str] = []
@@ -167,7 +172,7 @@ def main() -> None:
         f.write("\n".join(out_lines))
         f.write("\n")
 
-    print("\nConfiguration written to:", dest_path)
+    print("\nConfiguration written to:", os.path.abspath(dest_path))
     print("\nPlease edit the file to add sensitive values such as OPENAI_API_KEY, EMBEDDING_API_KEY, and any API secrets (they are intentionally not prompted here).")
     print("You can re-run this setup script to override values at any time: \n\n    python setup.py\n")
 
