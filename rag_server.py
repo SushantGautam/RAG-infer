@@ -449,7 +449,7 @@ async def chat_completions(request: ChatCompletionRequest, fastapi_request: Requ
     Note: Currently, streaming, temperature, and max_tokens parameters are not
     supported and will be ignored if provided.
     """
-    if qa_chain is None:
+    if base_qa is None:
         raise HTTPException(status_code=503, detail="RAG system not initialized")
     
     # Check if streaming is requested
@@ -532,7 +532,7 @@ async def chat_completions(request: ChatCompletionRequest, fastapi_request: Requ
     except Exception as e:
         # Log the original pipeline error and any forwarding error without full traceback
         # (avoid noisy stack traces for expected pipeline errors; enable DEBUG to see full details)
-        logger.error(f"qa_chain.invoke failed: {e}")
+        logger.error(f"pipeline invocation failed: {e}")
         # No retriever-based fallback per user request — echo the user's question
         choices = [
             ChatCompletionChoice(
