@@ -196,9 +196,9 @@ def main() -> None:
             readme_path = os.path.join(abs_doc_path, "README.md")
             if not os.path.exists(readme_path):
                 with open(readme_path, "w", encoding="utf-8") as rf:
-                    rf.write("# Documents directory\n\nAdd your text documents (e.g., .txt files) here before running `ingest_documents`.\n")
+                    rf.write("# Documents directory\n\nAdd your text documents (e.g., .txt files) here before running `ingest-documents`.\n")
             print(f"\nDocuments directory ensured at: {abs_doc_path}")
-            print("→ Add your documents (e.g., .txt files) into that directory before running `ingest_documents` to ingest them.")
+            print("→ Add your documents (e.g., .txt files) into that directory before running `ingest-documents` to ingest them.")
         except Exception as e:
             print(f"\n⚠ Could not create documents directory {abs_doc_path}: {e}")
 
