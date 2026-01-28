@@ -23,7 +23,6 @@ PROMPT_KEYS = [
     "MILVUS_DB",
     "COLLECTION_NAME",
     "DOCUMENTS_PATH",
-    "MODEL_NAME",
     "EMBEDDING_MODEL_NAME",
     "CHUNK_SIZE",
     "CHUNK_OVERLAP",
@@ -54,7 +53,6 @@ COLLECTION_NAME=rag_collection
 DOCUMENTS_PATH=./documents
 
 # Model Configuration
-MODEL_NAME=gpt-3.5-turbo
 EMBEDDING_MODEL_NAME=text-embedding-ada-002
 CHUNK_SIZE=1000
 CHUNK_OVERLAP=200
