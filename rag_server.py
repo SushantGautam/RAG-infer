@@ -41,6 +41,7 @@ from utils import ai_message_to_chat_completion
 
 # Global variables to store initialized components
 qa_chain = None
+base_qa = None
 vectorstore = None
 
 
@@ -203,8 +204,8 @@ def parse_args():
     parser.add_argument(
         "--model-name",
         type=str,
-        default=os.getenv("OPENAI_MODEL_NAME", "gpt-3.5-turbo"),
-        help="OpenAI model name (default: gpt-3.5-turbo or OPENAI_MODEL_NAME env var)",
+        default=None,
+        help="OpenAI model name to use as a server-wide default (omit to require 'model' per request)",
     )
     parser.add_argument(
         "--embedding-api-key",
@@ -361,34 +362,37 @@ Answer:"""
         input_variables=["context", "question"],
     )
     
-    # Initialize ChatOpenAI
-    print(f"Initializing ChatOpenAI with model {args.model_name}...")
-    llm_kwargs = {
-        "model_name": args.model_name,
-        # "temperature": 0
-    }
-    
-    # Set custom base URL if provided
-    if args.openai_base_url:
-        llm_kwargs["base_url"] = args.openai_base_url
-    
-    llm_instance = ChatOpenAI(**llm_kwargs)
-    
-    # Create QA chain using LCEL
-    qa_chain = (
+    # Create base pipeline (retriever + prompt) without binding a model
+    base_pipeline = (
         RunnableParallel(
             context=retriever,
             question=RunnablePassthrough(),
         )
         | PROMPT
-        | llm_instance
     )
 
-    # Expose some initialized components to module-level globals for fallbacks
-    global retriever_obj, PROMPT_TEMPLATE, llm
+    llm_instance = None
+    # If a server-wide default model was provided at startup, bind it now.
+    if getattr(args, "model_name", None):
+        print(f"Initializing ChatOpenAI with default model {args.model_name}...")
+        llm_kwargs = {
+            "model_name": args.model_name,
+            # "temperature": 0
+        }
+        if args.openai_base_url:
+            llm_kwargs["base_url"] = args.openai_base_url
+        llm_instance = ChatOpenAI(**llm_kwargs)
+        qa_chain = base_pipeline | llm_instance
+    else:
+        print("No default model configured; requests must include a 'model' field to specify which model to use.")
+        qa_chain = None
+
+    # Expose some initialized components to module-level globals for use per-request
+    global retriever_obj, PROMPT_TEMPLATE, llm, base_qa
     retriever_obj = retriever
     PROMPT_TEMPLATE = PROMPT
     llm = llm_instance
+    base_qa = base_pipeline
     
     print("RAG system initialized successfully!")
 
@@ -431,7 +435,7 @@ async def root():
 @app.get("/health")
 async def health():
     """Health check endpoint."""
-    return {"status": "healthy", "rag_initialized": qa_chain is not None}
+    return {"status": "healthy", "rag_initialized": base_qa is not None}
 
 
 @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
@@ -493,14 +497,35 @@ async def chat_completions(request: ChatCompletionRequest, fastapi_request: Requ
     raw_response = None
 
     try:
-        # Run the synchronous qa_chain.invoke() in a thread pool and return OpenAI-compatible dict directly.
+        # Run the synchronous pipeline in a thread pool and return OpenAI-compatible dict directly.
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            qa_chain.invoke,
-            question
-        )
+        if qa_chain is not None:
+            # Server has a default model configured; use the prebuilt pipeline
+            result = await loop.run_in_executor(
+                None,
+                qa_chain.invoke,
+                question
+            )
+        else:
+            # No server-default model: require a model be specified per-request
+            model_id = request.model
+            if not model_id:
+                raise HTTPException(status_code=400, detail="No model specified. Provide 'model' in request or start server with --model-name to use a default.")
+            llm_kwargs = {"model_name": model_id}
+            if getattr(app.state.args, "openai_base_url", None):
+                llm_kwargs["base_url"] = app.state.args.openai_base_url
+            llm_instance_req = ChatOpenAI(**llm_kwargs)
+            temp_chain = base_qa | llm_instance_req
+            result = await loop.run_in_executor(
+                None,
+                temp_chain.invoke,
+                question
+            )
+
         result = ai_message_to_chat_completion(result)  # openai format dict.
+        # Ensure the returned model name is set sensibly when missing
+        if isinstance(result, dict) and (not result.get("model") or result.get("model") == "unknown"):
+            result["model"] = request.model or getattr(app.state.args, "model_name", "unknown")
         # Assume dict return is guaranteed; return it directly and let FastAPI validate.
         return result
 
