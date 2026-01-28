@@ -78,8 +78,10 @@ def read_env_file(path: str) -> Tuple[List[str], Dict[str, str]]:
     return lines, mapping
 
 
-def prompt(value_name: str, default: str) -> str:
-    prompt_text = f"{value_name} [{default}]: "
+def prompt(value_name: str, default: str, display_default: str | None = None) -> str:
+    """Prompt the user, showing `display_default` if provided but returning `default` when accepted."""
+    shown = display_default if display_default is not None else default
+    prompt_text = f"{value_name} [{shown}]: "
     try:
         resp = input(prompt_text).strip()
     except EOFError:
@@ -118,13 +120,22 @@ def main() -> None:
         # strip surrounding quotes if present
         if default.startswith('"') and default.endswith('"'):
             default = default[1:-1]
-        new_val = prompt(key, default)
+
+        # For path-like defaults (containing '/' or starting with '.' or '/'), display absolute path only
+        display_default = None
+        if default:
+            if "/" in default or default.startswith(".") or default.startswith("/"):
+                display_default = os.path.abspath(default)
+            else:
+                display_default = default
+
+        new_val = prompt(key, default, display_default)
         new_values[key] = new_val
 
     # Ask user where to write the file (confirm or override dest)
     full_dest = os.path.abspath(dest_path)
     try:
-        dest_input = input(f"Write configuration to file [default: {dest_path} ({full_dest})]: ").strip()
+        dest_input = input(f"Write configuration to file [default: {full_dest}]: ").strip()
     except EOFError:
         # Non-interactive environment: accept the default
         dest_input = ""
