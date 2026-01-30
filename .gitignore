@@ -50,5 +50,6 @@ test_documents/
 *.pid
 dump_out
 
-static
+# static
 documents/documents
+static/documents
