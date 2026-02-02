@@ -197,6 +197,8 @@ def public_endpoint(func):
 async def doc_content(file: str = Query(..., description="Filename (with or without .md)"), start: Optional[int] = None, end: Optional[int] = None):
     """Return file content as numbered lines and optionally a slice (1-indexed inclusive)."""
     # Sanitize file name and enforce .md
+    if file.startswith("chunk_id="):
+        file = file[len("chunk_id="):]
     base = os.path.basename(file)
     if not base.lower().endswith(".md"):
         base = base + ".md"
